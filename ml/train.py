@@ -7,18 +7,19 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 
 
-
 def get_dvc_hash():
     with open("data/digits.csv.dvc") as file:
         for line in file:
             if line.strip().startswith("- md5:"):
                 return line.split(":", 1)[1].strip()
 
+
 def get_git_commit():
     return subprocess.check_output(
         ["git", "rev-parse", "HEAD"],
         text=True,
     ).strip()
+
 
 X_train = []
 y_train = []
@@ -68,10 +69,10 @@ with mlflow.start_run():
     mlflow.log_param("git_commit", get_git_commit())
     mlflow.log_metric("accuracy", accuracy)
     mlflow.sklearn.log_model(
-    model,
-    name="random_forest_model",
-    skops_trusted_types=["sklearn.tree._tree.Tree"],
-)
+        model,
+        name="random_forest_model",
+        skops_trusted_types=["sklearn.tree._tree.Tree"],
+    )
 
     print("Training samples:", len(X_train))
     print("Test samples:", len(X_test))
