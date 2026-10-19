@@ -4,7 +4,7 @@
 
 The API has been tested locally in Docker with a model directory mounted read-only.
 
-This setup requires Docker and access to the local MLflow tracking database and model artifacts. Automated staging and production delivery remain to be configured.
+This setup requires Docker, DVC with Azure support, and authenticated access to the configured Azure remote. The original local MLflow database is not required when retrieving the model through DVC. Automated staging and production delivery remain to be configured.
 
 ## Current Model Candidate
 
@@ -25,23 +25,33 @@ This model remains a provisional production candidate pending further validation
 
 ## Prepare the Model
 
-Run the following from the repository root in the project's Python environment:
+The selected model directory is tracked with DVC and stored in the configured Azure remote.
+
+- DVC pointer: `model-export.dvc`
+- Model directory hash: `58e12a972fd9f3b000b2e5dfbcfe44eb.dir`
+- Exported files: 6
+
+On a machine with DVC Azure support installed and Azure authentication configured, run from the repository root:
 
 ```bash
-python -m pip install -r requirements.txt
+dvc pull model-export.dvc
 ```
 
-Download the model from the local MLflow store:
+This retrieves the model version referenced by the checked-out Git commit. The original local MLflow database is not required for this download.
+
+Confirm that `model-export` contains `MLmodel` and `model.skops`.
+
+Git tracks the small `model-export.dvc` pointer. The model directory itself is excluded from Git and the Docker build context, and its contents are stored through DVC in Azure.
+
+### Original MLflow Export
+
+The model was originally exported from the local MLflow store using:
 
 ```bash
 python -c "import mlflow; mlflow.set_tracking_uri('sqlite:///mlflow.db'); print(mlflow.artifacts.download_artifacts(artifact_uri='models:/m-b974534191434444a198ae3b33f0c4d2', dst_path='model-export'))"
 ```
 
-Confirm that `model-export` contains `MLmodel` and `model.skops`.
-
-This command requires the original local MLflow database and artifacts. A fresh Git clone alone does not include them. Portable model distribution for other machines and automated environments remains to be configured.
-
-The exported model directory is excluded from Git and the Docker build context.
+This original export command requires the local MLflow database and artifacts. Other machines should use the DVC pull command above.
 
 ## Build the Image
 
@@ -91,7 +101,7 @@ If MODEL_URI is not set, the service starts without a model. The health response
 
 ## Remaining Delivery Work
 
-- Configure portable access to the selected model artifact.
+- Configure and verify Azure authentication and DVC model retrieval in automated environments.
 - Configure staging and production GitHub environments and secrets.
 - Add automated delivery stages triggered by merges to staging and main.
 - Document and verify the complete commit, CI, staging, and production flow.
