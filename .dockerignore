@@ -27,3 +27,5 @@ work
 outputs
 
 *.log
+
+model-export
