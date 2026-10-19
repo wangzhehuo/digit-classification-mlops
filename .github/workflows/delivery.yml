@@ -1,0 +1,143 @@
+name: Environment delivery
+
+on:
+  push:
+    branches: [staging, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: delivery-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  delivery:
+    name: Validate and build environment image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          python -m pip install "dvc[azure]==3.67.1"
+
+      - name: Check code and run tests
+        run: |
+          python -m ruff check app ml tests
+          python -m ruff format --check app ml tests
+          python -m pytest -q
+
+      - name: Create environment file
+        env:
+          APP_ENV: ${{ secrets.APP_ENV }}
+        run: |
+          expected=staging
+          if [ "$GITHUB_REF_NAME" = "main" ]; then
+            expected=production
+          fi
+          if [ "$APP_ENV" != "$expected" ]; then
+            echo "APP_ENV is missing or does not match the target environment."
+            exit 1
+          fi
+          umask 077
+          printf 'APP_ENV=%s\nMODEL_URI=/models/digits\n' "$APP_ENV" > .env
+          echo "IMAGE_TAG=digit-classification-mlops:${expected}-${GITHUB_SHA}" >> "$GITHUB_ENV"
+
+      - name: Download selected model from Azure
+        env:
+          AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          AZURE_STORAGE_SAS_TOKEN: ${{ secrets.AZURE_STORAGE_SAS_TOKEN }}
+        run: |
+          test -n "$AZURE_STORAGE_ACCOUNT"
+          test -n "$AZURE_STORAGE_SAS_TOKEN"
+          dvc config --local remote.myazure.account_name "$AZURE_STORAGE_ACCOUNT"
+          dvc config --local remote.myazure.sas_token "$AZURE_STORAGE_SAS_TOKEN"
+          dvc pull model-export.dvc
+          test -f model-export/MLmodel
+          test -f model-export/model.skops
+
+      - name: Build environment image
+        run: docker build -t "$IMAGE_TAG" .
+
+      - name: Start container with selected model
+        run: |
+          docker run -d --name digit-delivery \
+            -p 127.0.0.1:8001:8000 \
+            --env-file .env \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/model-export,target=/models/digits,readonly" \
+            "$IMAGE_TAG"
+
+      - name: Verify model loading and prediction
+        run: |
+          python - <<'PY'
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+
+          from sklearn.datasets import load_digits
+
+          base = "http://127.0.0.1:8001"
+
+          for attempt in range(60):
+              try:
+                  with urllib.request.urlopen(
+                      f"{base}/health", timeout=2
+                  ) as response:
+                      health = json.load(response)
+                  if health.get("model_loaded") is True:
+                      break
+              except (urllib.error.URLError, TimeoutError):
+                  pass
+              time.sleep(1)
+          else:
+              raise RuntimeError("Container model did not become ready.")
+
+          data = load_digits()
+          payload = json.dumps(
+              {"pixels": data.data[0].tolist()}
+          ).encode()
+          request = urllib.request.Request(
+              f"{base}/predict",
+              data=payload,
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(request, timeout=10) as response:
+              assert response.status == 200
+              prediction = json.load(response)
+
+          assert prediction == {"digit": int(data.target[0])}, prediction
+          print("Container model loading and sample prediction passed.")
+          PY
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs digit-delivery 2>/dev/null || true
+
+      - name: Clean up
+        if: always()
+        run: |
+          docker rm -f digit-delivery 2>/dev/null || true
+          python - <<'PY'
+          from pathlib import Path
+
+          for name in (".env", ".dvc/config.local"):
+              Path(name).unlink(missing_ok=True)
+          PY
