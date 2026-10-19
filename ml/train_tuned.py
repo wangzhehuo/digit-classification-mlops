@@ -6,7 +6,7 @@ import mlflow
 import mlflow.sklearn
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
-from sklearn.model_selection import train_test_split
+
 
 
 def get_dvc_hash():
@@ -23,28 +23,29 @@ def get_git_commit():
     ).strip()
 
 
-rows = []
+X_train = []
+y_train = []
+X_test = []
+y_test = []
 
 with open("data/digits.csv", newline="") as file:
-    reader = csv.reader(file)
-    next(reader)
+    reader = csv.DictReader(file)
 
     for row in reader:
-        rows.append(row)
+        features = [float(row[f"pixel_{i}"]) for i in range(64)]
+        target = int(float(row["target"]))
 
-indices = list(range(len(rows)))
+        if row["split"] == "train":
+            X_train.append(features)
+            y_train.append(target)
+        elif row["split"] == "test":
+            X_test.append(features)
+            y_test.append(target)
+        else:
+            raise ValueError(f"Invalid split value: {row['split']}")
 
-train_indices, test_indices = train_test_split(
-    indices,
-    test_size=0.2,
-    random_state=42,
-)
-
-X_train = [[float(value) for value in rows[i][:64]] for i in train_indices]
-y_train = [int(float(rows[i][64])) for i in train_indices]
-
-X_test = [[float(value) for value in rows[i][:64]] for i in test_indices]
-y_test = [int(float(rows[i][64])) for i in test_indices]
+if not X_train or not X_test:
+    raise ValueError("Both training and test sets must contain samples.")
 
 # Tuned model: change model parameters only.
 n_estimators = 100
