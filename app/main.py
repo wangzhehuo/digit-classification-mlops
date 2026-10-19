@@ -7,9 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class PredictionRequest(BaseModel):
-    pixels: list[
-        float,
-    ] = Field(min_length=64, max_length=64)
+    pixels: list[float,] = Field(min_length=64, max_length=64)
 
 
 class PredictionResponse(BaseModel):
@@ -49,8 +47,7 @@ def predict(payload: PredictionRequest, request: Request):
     import math
 
     if any(
-        not math.isfinite(pixel) or not 0 <= pixel <= 16
-        for pixel in payload.pixels
+        not math.isfinite(pixel) or not 0 <= pixel <= 16 for pixel in payload.pixels
     ):
         raise HTTPException(
             status_code=422,

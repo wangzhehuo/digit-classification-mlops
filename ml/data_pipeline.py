@@ -4,7 +4,6 @@ from pathlib import Path
 from sklearn.datasets import load_digits
 from sklearn.model_selection import train_test_split
 
-
 data = load_digits()
 
 indices = list(range(len(data.data)))
