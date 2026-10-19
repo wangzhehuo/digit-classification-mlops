@@ -4,7 +4,7 @@
 
 The API has been tested locally in Docker with a model directory mounted read-only.
 
-This setup requires Docker, DVC with Azure support, and authenticated access to the configured Azure remote. The original local MLflow database is not required when retrieving the model through DVC. Automated staging and production delivery remain to be configured.
+This setup requires Docker, DVC with Azure support, and authenticated access to the configured Azure remote. The original local MLflow database is not required when retrieving the model through DVC. Automated staging and production build and verification workflows have both passed.
 
 ## Current Model Candidate
 
@@ -99,9 +99,45 @@ Verified manual checks:
 
 If MODEL_URI is not set, the service starts without a model. The health response reports `model_loaded: false`, and valid prediction requests return HTTP 503.
 
-## Remaining Delivery Work
+## Automated Environment Delivery
 
-- Configure and verify Azure authentication and DVC model retrieval in automated environments.
-- Configure staging and production GitHub environments and secrets.
-- Add automated delivery stages triggered by merges to staging and main.
-- Document and verify the complete commit, CI, staging, and production flow.
+The delivery workflow is defined in `.github/workflows/delivery.yml`.
+
+| Trigger | GitHub environment | Environment configuration |
+| --- | --- | --- |
+| Push to staging after a merge | staging | APP_ENV=staging |
+| Push to main after a merge | production | APP_ENV=production |
+
+The staging environment permits the staging branch. The production environment permits the main branch.
+
+Each environment has its own secrets:
+
+- `APP_ENV`
+- `AZURE_STORAGE_ACCOUNT`
+- `AZURE_STORAGE_SAS_TOKEN`
+
+The workflow performs code checks and tests, creates a temporary `.env` file, retrieves the selected model from Azure using DVC, and builds an image tagged with the environment and commit SHA.
+
+The `.env` file contains APP_ENV and the container model path. Azure credentials are used separately for DVC access and are not included in the image.
+
+A temporary container starts with the downloaded model mounted read-only. The workflow waits for the health endpoint to report a loaded model, then checks a sample prediction. Connection errors during startup are retried. Container state and logs are collected if the workflow fails.
+
+The container and temporary credential configuration are removed during cleanup.
+
+## Verified Delivery Results
+
+- Model retrieval succeeded in a separate local clone with an independent DVC cache.
+- The retrieved model loaded successfully and predicted 0 for a sample whose target was 0.
+- Staging delivery passed Azure retrieval, image building, model loading, and sample prediction.
+- Production delivery passed the same workflow using the production environment.
+- The feature → dev → staging → main pull request path and required CI checks were exercised.
+
+The image is built and tested on the GitHub runner. It is not published to a registry, and the temporary verification container is not a persistent hosted service.
+
+## Remaining Validation and Operational Work
+
+- Evaluate the candidate with cross-validation or additional independent data.
+- Inspect per-class metrics and representative application inputs.
+- Assess inference latency and resource requirements.
+- Maintain valid Azure credentials and update environment secrets when needed.
+- If persistent hosting is required later, configure image publishing, deployment, and monitoring.
