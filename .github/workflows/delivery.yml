@@ -103,7 +103,16 @@ jobs:
                       health = json.load(response)
                   if health.get("model_loaded") is True:
                       break
-              except (urllib.error.URLError, TimeoutError):
+              except (
+                  urllib.error.URLError,
+                  TimeoutError,
+                  ConnectionError,
+              ) as exc:
+                  print(
+                      f"Readiness attempt {attempt + 1}/60: "
+                      f"{type(exc).__name__}",
+                      flush=True,
+                  )
                   pass
               time.sleep(1)
           else:
@@ -127,9 +136,12 @@ jobs:
           print("Container model loading and sample prediction passed.")
           PY
 
-      - name: Show container logs on failure
+      - name: Show container diagnostics on failure
         if: failure()
-        run: docker logs digit-delivery 2>/dev/null || true
+        run: |
+          docker ps -a --filter name=digit-delivery
+          docker inspect --format '{{json .State}}' digit-delivery || true
+          docker logs --timestamps digit-delivery || true
 
       - name: Clean up
         if: always()
